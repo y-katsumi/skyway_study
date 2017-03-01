@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, shrink-to-fit=no">
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>スマホVRサンプル</title>
+<style>
+body {
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    color: #fff;
+    margin: 0px;
+    padding: 0;
+    overflow: hidden;
+}
+</style>
+<script src="js/es6-promise.js"></script>
+<script src="js/three.min.js"></script>
+<script src="js/VRControls.js"></script>
+<script src="js/VREffect.js"></script>
+<script src="js/webvr-polyfill.js"></script>
+<script src="js/webvr-manager.js"></script>
+</head>
+
+<body>
+
+<script>
+/**
+ * @author alteredq / http://alteredqualia.com/
+ */
+
+THREE.MorphAnimMesh = function( geometry, material ) {
+
+    THREE.Mesh.call( this, geometry, material );
+
+    // API
+
+    this.duration = 1000; // milliseconds
+    this.mirroredLoop = false;
+    this.time = 0;
+
+    // internals
+
+    this.lastKeyframe = 0;
+    this.currentKeyframe = 0;
+
+    this.direction = 1;
+    this.directionBackwards = false;
+
+};
+
+THREE.MorphAnimMesh.prototype = new THREE.Mesh();
+THREE.MorphAnimMesh.prototype.constructor = THREE.MorphAnimMesh;
+
+THREE.MorphAnimMesh.prototype.updateAnimation = function ( delta ) {
+
+    var frameTime = this.duration / ( this.geometry.morphTargets.length - 1 );
+
+    this.time += this.direction * delta;
+
+    if ( this.mirroredLoop ) {
+
+        if ( this.time > this.duration || this.time < 0 ) {
+
+            this.direction *= -1;
+
+            if ( this.time > this.duration ) {
+
+                this.time = this.duration;
+                this.directionBackwards = true;
+
+            }
+
+            if ( this.time < 0 ) {
+
+                this.time = 0;
+                this.directionBackwards = false;
+
+            }
+
+        }
+
+    } else {
+
+        this.time = this.time % this.duration;
+
+    }
+
+    var keyframe = THREE.Math.clamp( Math.floor( this.time / frameTime ), 0, this.geometry.morphTargets.length - 1 );
+
+    if ( keyframe != this.currentKeyframe ) {
+
+        this.morphTargetInfluences[ this.lastKeyframe ] = 0;
+        this.morphTargetInfluences[ this.currentKeyframe ] = 1;
+
+        this.morphTargetInfluences[ keyframe ] = 0;
+
+        this.lastKeyframe = this.currentKeyframe;
+        this.currentKeyframe = keyframe;
+
+    }
+
+    var mix = ( this.time % frameTime ) / frameTime;
+
+    if ( this.directionBackwards ) {
+
+        mix = 1 - mix;
+
+    }
+
+    this.morphTargetInfluences[ this.currentKeyframe ] = mix;
+    this.morphTargetInfluences[ this.lastKeyframe ] = 1 - mix;
+
+};
+
+// レンダラを生成
+var renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setPixelRatio(window.devicePixelRatio);
+
+document.body.appendChild(renderer.domElement);
+
+// シーンを生成
+var scene = new THREE.Scene();
+
+// カメラを生成
+var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+
+// VR用コントローラを生成
+var controls = new THREE.VRControls(camera);
+
+// VR用エフェクトを生成
+var effect = new THREE.VREffect(renderer);
+effect.setSize(window.innerWidth, window.innerHeight);
+
+// VRマネージャの生成
+var manager = new WebVRManager(renderer, effect);
+
+//////////////////////////////////////////////////
+// 各種オブジェクトのセットアップ
+
+// Skysphereの生成
+var skysphereLoader = new THREE.TextureLoader();
+skysphereLoader.load('img/bg_skyplane.png', onSkysphereTextureLoaded);
+function onSkysphereTextureLoaded(texture) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+
+    var geometry = new THREE.SphereGeometry(5000, 128, 128);
+    // var geometry = new THREE.BoxGeometry(1000, 1000, 1000);
+    var material = new THREE.MeshBasicMaterial({
+        map: texture,
+        color: 0xffffff,
+        side: THREE.BackSide
+    });
+
+    var skysphere = new THREE.Mesh(geometry, material);
+    skysphere.position.z = 0;
+    scene.add(skysphere);
+}
+
+// 地球オブジェクトの生成
+var earth = new THREE.Object3D();
+var earthLoader = new THREE.TextureLoader();
+earthLoader.load('img/IMG_20160929_204442.jpg', onEarthTextureLoaded);
+function onEarthTextureLoaded(texture) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+
+    var geometry = new THREE.SphereGeometry(0.3, 32, 32);
+    var material = new THREE.MeshLambertMaterial({
+        map: texture,
+        color: 0xffffff
+    });
+
+    earth = new THREE.Mesh(geometry, material);
+    earth.position.z = -1;
+    scene.add(earth);
+}
+
+// お化け
+loader = new THREE.JSONLoader();
+var obakeGeometry,ogakeMaterial;
+var obakeMesh;
+loader.load( 'json/obake3d.json', function ( geometry, materials ) { //第１引数はジオメトリー、第２引数はマテリアルが自動的に取得）
+  //全てのマテリアルのモーフターゲットの値をtrueにする
+  for (var i = 0, l = materials.length; i < l; i++) {
+       materials[i].morphTargets = true;
+  }
+  obakeGeometry = geometry;
+  ogakeMaterial = materials;
+
+  //モーフアニメーションメッシュ生成
+obakeMesh = new THREE.MorphAnimMesh(obakeGeometry, new THREE.MeshFaceMaterial(ogakeMaterial));
+    obakeMesh.scale.set( 0.3, 0.3, 0.3 );
+obakeMesh.position.z = 3;
+
+scene.add(obakeMesh);
+
+});
+
+var light = new THREE.DirectionalLight(0xffffff);
+light.position.set(1, 1, 1);
+scene.add(light);
+
+//////////////////////////////////////////////////
+
+// アニメーションループ
+var lastRender = 0;
+function animate(timestamp) {
+    var delta = Math.min(timestamp - lastRender, 500);
+    lastRender = timestamp;
+
+    earth.rotation.y += 0.05;
+
+if (obakeMesh) {
+  obakeMesh.rotation.y -= 0.3;
+}
+
+
+    // VRコントローラのupdate
+    controls.update();
+
+    // VRマネージャを通してシーンをレンダリング
+    manager.render(scene, camera, timestamp);
+
+    // アニメーションループ
+    requestAnimationFrame(animate);
+}
+
+// アニメーションの開始
+animate(performance ? performance.now() : Date.now());
+
+</script>
+
+</body>
+</html>
